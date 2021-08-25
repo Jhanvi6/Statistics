@@ -1,0 +1,845 @@
+---
+title: "GROUP 4 ASSIGNMENT- FINAL REPORT"
+authors: "Aditya Deshpande(500262382),Amit Desai(500589441),Anirudh Bhat(490492189),Aakanksha Jain(312153430),Geogy Sabu Jose(490556492),    Jhanvi Gupta(500249305), Rana Hamad Khan (500215676) & Shabari Gadewar(490607392)"
+output:
+  html_document:
+    code_folding: hide
+    pdf_document: default
+---
+<style>
+body {
+text-align: justify}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### 1. OVERVIEW OF THE PROBLEM
+Traumatic injuries can produce both acute and more chronic consequences that lead to permanent disabilities, increase long-term mortality and reduced life expectancy. Patient attributes, injury characteristics and treatment interventions are the key factors in determining short-term survival and clinical outcomes of the patient. 
+
+The aim of this project is to apply machine learning algorithms to predict clinical outcomes for patients with severe bleeding from trauma, in order to inform clinical decision making in the hospital setting. 
+In particular, we seek to build a classification model that will identify whether a patient is likely to make full recovery, require care and rehabilitation or at risk of dying. Intention of the project is identify patients who will become dependent after their injury and will require extensive care and patients who may not survive in the course of treatment. This will assist hospitals to organize appropriate rehabilitation and counselling resources for the patient and their kin in a timely manner.  The project will compare the results of several classification approaches including Random Forest, K-Nearest Neighbour, Support Vector Machines, Bagging and Linear Models(Multinomial and Ordinal) to find the optimal model to predict results.
+
+### 2. DATASET DESCRIPTION
+This project presents the analysis of the CRASH-2 (Clinical Randomisation of an Antifibrinolytic in Significant Haemorrhage) study data. The CRASH-2 consists of 20,207 adult trauma patients with, or at risk of significant bleeding who were generally within 8 hours of injury (1).
+
+```{r, message = FALSE, results='hide', warning = FALSE}
+library(tidyverse)
+library(dplyr)
+library(data.table)
+library(ggplot2)
+library(gridExtra)
+library(kableExtra)
+library(Hmisc)
+library(funModeling)
+library(psych)
+library(scales)
+library(DescTools)
+library(ggpubr)
+library(caret)
+library(kableExtra)
+library(randomForest)
+library(earth)
+library(mldr)
+library(nnet)
+library(MASS)
+library(e1071)
+library(tibble)
+library(corrplot)
+library(Hmisc)
+library(class)
+library(gmodels)
+library(ipred)
+library(DMwR)
+```
+
+```{r ReadDataSet, message = FALSE, results='hide', warning = FALSE}
+# Read the input data file.
+load(file = "crash2.rda")
+```
+
+```{r CheckInputData, message = FALSE, results='hide', warning = FALSE}
+
+# Check the class of input data
+print(class(crash2))
+# Check Dimensions of input data
+print(dim(crash2))
+# Check columns present in the data
+print(colnames(crash2))
+# write to csv so that data can be
+# analysed manually
+#write.csv(crash2, "data.csv")
+```
+
+### 3. INITIAL DATA ANALYSIS AND VISUALISATION OF THE DATA
+Initial data Analysis revealed that the CRASH-2 dataset had 10% NA values with at-least one NA in every row. The trauma patients had been classified into six different categories -  “no symptoms”, “minor symptoms”, “some restriction in lifestyle but independent”, “dependent, but not requiring constant attention”, “fully dependent, requiring attention day and night” and “dead”. Our study, however, is concerned with identifying if a trauma patient after treatment dies, has a full recovery or recovers but is still dependent on others. In order to achieve this,  we have reclassified the six categories into 3 main categories - 'dead', 'independent' and 'dependent'.
+
+```{r DropUnWantedColumns1, message = FALSE, results='hide', warning = FALSE}
+#### Data Cleaning
+
+#After performing manual preliminary analysis of the data, the columns identified as irrelevant are decided to be dropped. Columns dropped are related to date of death, date of discharge, entry form of patient, date of randomization, outcome database id, specified cause of death for category "other".
+
+# Drop the columns specified above.
+working.dataset <- subset(crash2, select = -c(scauseother, ddeath, ddischarge, source, trandomised, outcomeid))
+# Check whether columns dropped successfully or not
+print(dim(working.dataset))
+# Get the columns in dataset again
+print(colnames(working.dataset))
+```
+
+```{r AppendLevelToConditionAndStatus , message = FALSE, results='hide', warning = FALSE}
+
+#In the given dataset, the problem statement is to predict or classify "condition" column which signifies condition of the patient when discharged. In addition, classification must also be performed to understand whether the patient looses his life. There is a need to add another level in this column to specify whether the patient has lost the life. Below code is to try and add another level "dead" to signify that the patient has lost the life.
+
+# Add another level "dead" to the condition column
+levels(working.dataset$condition) <- c(levels(working.dataset$condition), "dead")
+# Apply newly added dead level to all NAs in the condition column
+working.dataset$condition[-which(is.na(crash2$ddeath))] <- "dead"
+# Check if level is applied correctly
+any(is.na(working.dataset$condition))
+head(working.dataset$condition)
+#NAs are still present in condition
+# Count the NAs present in condition
+# gives 165, we can certainly neglect
+# these 165 entries considering size of 
+# dataset
+print(length(working.dataset$condition[is.na(working.dataset$condition)]))
+
+# Try to repeat same process for the column "status"
+# Add another level "dead" to the status column
+levels(working.dataset$status) <- c(levels(working.dataset$status), "dead")
+# Apply newly added dead level to all NAs in the status column
+working.dataset$status[-which(is.na(crash2$ddeath))] <- "dead"
+# Check if level is applied correctly
+any(is.na(working.dataset$status))
+head(working.dataset$status)
+# NAs are still present in status
+# Count the NAs present in status
+print(length(working.dataset$status[is.na(working.dataset$status)]))
+
+# check number of NAs present in status
+# when condition NAs are removed
+# 0 that is perfect.
+temp.dataset <- working.dataset[-which(is.na(working.dataset$condition)), ]
+print(length((temp.dataset$status[is.na(temp.dataset$status)])))
+```
+
+```{r AppendLevelToCause , message = FALSE, results='hide', warning = FALSE}
+#For the attribute "cause" which represents cause of death of the patient, a new level is added to represent NAs "NotApplicable", just to make it simple.
+
+# Add a new level "NotApplicable" to the cause column
+levels(working.dataset$cause) <- c(levels(working.dataset$cause), "NotApplicable")
+# Apply newly added dead level to all NAs in the cause column
+working.dataset$cause[which(is.na(crash2$ddeath))] <- "NotApplicable"
+# Check if level is applied correctly
+any(is.na(working.dataset$cause))
+head(working.dataset$cause)
+```
+```{r GetFactorColumns , message = FALSE, results='hide', warning = FALSE}
+##### Print all the columns in working data that are represented as factors. These columns need to be represented as numeric values so that can be used in the classification by applying scale. Once the factors are represented as numeric values, dataset will be easier to perform classification.
+
+for(col in colnames(working.dataset))
+{
+  if(is.factor(working.dataset[[col]]))
+    print(col)
+}
+```
+
+```{r DeleteNAsFromConditionAttr , message = FALSE, results='hide', warning = FALSE}
+#Delete all the rows with NA in condition attribute, which is a class attribute for classification.
+# Prepare dataset without Condition NAs
+working.dataset <- working.dataset[-which(is.na(working.dataset$condition)), ]
+```
+
+```{r Outcome Categories , message = FALSE, results='hide', warning = FALSE}
+
+
+#### Outcome Categories
+#Perform data analysis using plots. Get Histogram for condition of patients, which will be considered as the class for classification.
+#Examining other outcome levels that make more sense and are more clearly differentiated
+
+  
+# get the levels in Condition columns
+
+working.dataset$condition_severity <- factor(case_when(
+  working.dataset$condition  == "dead" ~ "Dead",
+  working.dataset$condition  == "fully dependent, requiring attention day and night" ~ "Dependent",
+  working.dataset$condition  == "dependent, but not requiring constant attention" ~ "Dependent",
+  working.dataset$condition  == "some restriction in lifestyle but independent" ~ "Independent",
+  working.dataset$condition  == "minor symptoms" ~ "Independent",
+  working.dataset$condition  == "no symptoms" ~ "Independent",
+  TRUE ~ "Unknown"
+), levels = c("Dead", "Dependent", "Independent"))
+
+# get the levels in Condition columns
+
+working.dataset$condition <- factor(case_when(
+  working.dataset$condition  == "dead" ~ "Dead",
+  working.dataset$condition  == "fully dependent, requiring attention day and night" ~ "Fully Dependent",
+  working.dataset$condition  == "dependent, but not requiring constant attention" ~ "Partially Dependent",
+  working.dataset$condition  == "some restriction in lifestyle but independent" ~ "Independent",
+  working.dataset$condition  == "minor symptoms" ~ "Minor Symptoms",
+  working.dataset$condition  == "no symptoms" ~ "No Symptoms",
+  TRUE ~ "Unknown"
+), levels = c("Dead", "Fully Dependent", "Partially Dependent", "Independent", "Minor Symptoms", "No Symptoms", "Unknown"))
+
+# plot histogram
+univariate_new_severity <- working.dataset %>% group_by(condition, condition_severity) %>% 
+ summarise(count = n()) %>%  # count records by species
+ mutate(pct = count/sum(count))  %>% # find percent of total
+ggplot(aes(condition_severity, count, fill = condition)) + 
+  geom_bar(stat='identity') + 
+  geom_text(aes(label=count), position = position_stack(vjust = .5))+
+  ylab("Percentage of Patients") + 
+  ggtitle(" FIGURE 1 \n Patients Across Outcome Variables") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+suppressMessages(univariate_new_severity)
+
+```
+
+```{r Binary Variables , message = FALSE, echo=FALSE, results=FALSE, warning = FALSE, eval=FALSE}
+
+##### Analysis of Binary Variables.
+#Analysis of Binary Variables that indicate whether a patient has a a certain co-morbidities or undergone a certain surgery during the hospital stay.
+
+percentage <- function(x){
+  return(mean(x)*100)
+}
+
+df_dead_binary <- working.dataset %>% filter(condition_severity == "Dead") %>% select("bheadinj", "bneuro", "bchest", "babdomen", "bpelvis", "bpe", "bdvt", "bstroke", "bbleed", "bmi", "bgi") %>% summarise_all(funs(percentage))
+
+df_t = as_tibble(t(df_dead_binary), rownames = "row_names") %>% arrange(desc(V1)) %>% mutate(condition_flag = "Dead")
+
+df_dependent_binary <- working.dataset %>% filter(condition_severity == "Dependent") %>% select("bheadinj", "bneuro", "bchest", "babdomen", "bpelvis", "bpe", "bdvt", "bstroke", "bbleed", "bmi", "bgi") %>% summarise_all(funs(percentage))
+
+df_t = bind_rows(df_t, as_tibble(t(df_dependent_binary), rownames = "row_names") %>% 
+          arrange(desc(V1)) %>% mutate(condition_flag = "Dependent"))
+
+
+df_independent_binary <- working.dataset %>% filter(condition_severity == "Independent") %>% select("bheadinj", "bneuro", "bchest", "babdomen", "bpelvis", "bpe", "bdvt", "bstroke", "bbleed", "bmi", "bgi") %>% summarise_all(funs(percentage))
+
+df_t = bind_rows(df_t, as_tibble(t(df_independent_binary), rownames = "row_names") %>% 
+          arrange(desc(V1)) %>% mutate(condition_flag = "Independent"))
+
+
+row_labs <- c("Pulmonary Embolism", "Significant Head Injury", "Chest Surgery",  "Stroke", "Neurosurgery", "Abdominal Surgery", "Pelvis Surgery", "Deep Vein Thrombosis", "Surgery - Bleeding",  "Myocardial Infarction", "Gastrointestinal Bleeding")
+p<-ggplot(data=df_t, aes(x= row_names, y=V1, fill = condition_flag)) +
+  geom_bar(position="fill", stat="identity") +
+  scale_fill_discrete(name = "Co-morbidities") +
+  labs(fill = "Dose (mg)") +
+  ylab("Percentage of Patients (%)") + 
+  xlab("Columns")  + 
+  ggtitle("FIGURE 2 \n Percentage of Patients with Co-morbidities and Surgeries") +
+  scale_x_discrete(labels=c("bheadinj" = "Head Injury", "bneuro" = "Neurosurgery",
+                              "bchest" = "Chest Surgery", "babdomen" = "Abdominal Surgery",
+                              "bpelvis" = "Pelvis Surgery", "bpe" = "Pulmonary embolism", 
+                              "bdvt" = "Deep Vein Thrombosis", "bstroke" = "Stroke", 
+                              "bbleed" = "Bleed", "bmi" = "Myocardial Infarction", 
+                              "bgi" = "Gastrointestinal Bleed")) + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1), plot.title = element_text(hjust = 0.5))
+
+
+suppressWarnings( p)
+```
+
+```{r DeathCuasesInPatientsHist , message = FALSE, results='hide', warning = FALSE}
+
+#Plot histogram for causes of death in patients
+
+# Create new datafram only for patients who lost lives
+patients.condition.dead <- working.dataset[working.dataset$condition == "dead", c("condition", "cause")]
+
+# Check dataframe
+head(patients.condition.dead, 30)
+
+# Get levels in cuase
+print(levels(patients.condition.dead$cause))
+
+# extract cause as numeric
+numeric.cause <- as.numeric(patients.condition.dead$cause)
+
+# plot histogram
+#ggplot(mapping = aes(numeric.cause)) + geom_histogram() +  xlab("Causes")
+```
+
+```{r ConvertFactorsToNumeric , message = FALSE, results='hide', warning = FALSE}
+
+# Convert the columns represented as factors to numeric format. The numeric attribute for each factor will be added to the existing dataframe.
+# Add new attribute n_sex to represent sex in numeric format.
+working.dataset["n_sex"] <- as.numeric(working.dataset$sex)
+# Add new attribute n_injurytype to represent injurytype in numeric format.
+working.dataset["n_injurytype"] <- as.numeric(working.dataset$injurytype)
+# Add new attribute n_casue to represent casue in numeric format.
+working.dataset["n_cause"] <- as.numeric(working.dataset$cause)
+# Add new attribute n_status to represent status in numeric format.
+#working.dataset["n_status"] <- as.numeric(working.dataset$status)
+# Add new attribute n_condition to represent condition in numeric format.
+working.dataset["n_condition"] <- as.numeric(working.dataset$condition)
+
+# Check all the columns 
+print(colnames(working.dataset))
+```
+
+```{r PCACalc , message = FALSE, results='hide', warning = FALSE}
+
+#### Perform PCA on data and try to plot it. 
+#Columns "ncell", "nplasma"	"nplatelets" and "ncryo",	which are related to #"Blood Transfusion" are not considered for calculating PCA.
+
+calcAndPlotPCA <- function()
+{
+  # generate dataframe from working data to calculate PCA
+  pca.data <- subset(working.dataset, select = -c(ncell, nplasma, nplatelets, ncryo, entryid, status, condition, sex, injurytype, cause, condition_severity))
+  # remove na rows and consider only the complete cases
+  pca.data <- pca.data[complete.cases(pca.data),]
+  # print the dimesions of the final dataset used for pca calculation
+  print(dim(pca.data))
+  # extract class column that is n_condition 
+  pca.labels <- pca.data$n_condition
+  # remove n_condition which is class column from the pca.data
+  pca.data <- subset(pca.data, select = -c(n_condition))
+  # perform pca calculation
+  pca.output <- prcomp(pca.data, scale = TRUE)
+  #plot(pca.output, main = "PCA Plot")
+  
+pca.df <- data.frame(PC1 = pca.output$x[,1], PC2 = pca.output$x[,2],
+                        PC3 = pca.output$x[,3],labels = factor(pca.labels))
+
+  #kmeans.output <- kmeans(pca.data, 6)
+#ggplot(pca.df, aes(PC1, PC2, col = factor(kmeans.output$cluster))) + geom_point() + theme_minimal()
+return(pca.df)
+}
+calcAndPlotPCA()
+pca_original <- ggplot(calcAndPlotPCA(), aes(PC1, PC2, col = labels)) + geom_point() + theme_minimal()+  theme(legend.position = "below") + ggtitle("FIGURE 2 \n PCA Outcome (6 Classes)")
+
+```
+
+#### PRINCIPAL COMPONENT ANALYSIS
+
+```{r PCACalc  severity , message = FALSE, results='hide', warning = FALSE}
+
+working.dataset %>%
+  group_by(condition_severity) %>%
+  summarise(n = n()) %>%
+  mutate(freq = n * 100/ sum(n))
+
+calcAndPlotPCA <- function()
+{
+  # generate dataframe from working data to calculate PCA
+  pca.data <- subset(working.dataset, select = -c(ncell, nplasma, nplatelets, ncryo, entryid, status, condition, sex, injurytype, cause))
+  # remove na rows and consider only the complete cases
+  pca.data <- pca.data[complete.cases(pca.data),]
+  # print the dimesions of the final dataset used for pca calculation
+  print(dim(pca.data))
+  # extract class column that is n_condition 
+  pca.labels <- pca.data$condition_severity
+  # remove condition_severity which is class column from the pca.data
+  pca.data <- subset(pca.data, select = -c(condition_severity))
+  # perform pca calculation
+  pca.output <- prcomp(pca.data, scale = TRUE)
+  #plot(pca.output, main = "PCA Plot")
+  
+pca.df <- data.frame(PC1 = pca.output$x[,1], PC2 = pca.output$x[,2],
+                        PC3 = pca.output$x[,3],labels = pca.labels)
+pca_new <- ggplot(pca.df, aes(PC1, PC2, col = labels)) + geom_point() + theme_minimal() +  theme(legend.position = "below") + ggtitle("\n PCA Outcome (3 Classes)")
+
+
+  #kmeans.output <- kmeans(pca.data, 6)
+#ggplot(pca.df, aes(PC1, PC2, col = factor(kmeans.output$cluster))) + geom_point() + theme_minimal()
+return(pca_new)
+}
+pca_new <- calcAndPlotPCA()
+
+suppressMessages(grid.arrange(pca_original, pca_new, nrow = 1))
+
+```
+
+#### CORRELATION
+From the correlation plot, it can be seen that there is a high correlation between gcs and gcseye. This is because gcs (glasgow coma score ) and gcseye(glasgow coma score eye opening) have high correlation since gcseye is a subpart of the gsc test. The plot also revealed that there is good correlation between bneuro(Neuro surgery done) and bheadinj(severe head injury) which is expected as patients with severe head injuries are highly likely to have neuro surgeries performed. 
+
+```{r correlation matrix  , message = FALSE, results='hide', warning = FALSE}
+
+
+local.data <-   subset(working.dataset, select = -c(ncell, nplasma, nplatelets, ncryo, entryid, status, condition, sex, injurytype, cause, condition_severity, boxid ))
+
+corrplot(cor(local.data, method = "pearson", use = "complete.obs"), 
+         title = 'FIGURE 3 \n Correlation matrix',mar=c(0,0,2,0))
+
+res2 <- rcorr(as.matrix(local.data))
+
+```
+
+```{r DropUnWantedColumns, message = FALSE, results='hide', warning = FALSE}
+
+##### After performing manula preliminary analysis of the data, the columns identified as irrelevant are decided to be dropped. Below is the explanation and description of the columns that are dropped.
+
+##### Column: "entryid" -> Unique id to identify patient.
+##### Column: "scauseother" -> Specifies cuase of death for category other.
+##### Column: "ddeath" -> Date of death.
+##### Column: "ddischarge" -> Date of discharge from the hospital.
+##### Column: "source" -> Source of communication or entry form of patient.
+##### Column: "trandomised" -> Date of Randomization
+##### Column: "outcomeid" -> Unique Number From Outcome Database
+##### Column: "boxid" -> treatment uniqe combination along with packnum
+##### Column: "packnum" -> treatment uniqe combination along with boxid
+##### Column: "ndaysicu" -> Ndays in ICU should not be considered as it may not be known at the time of admission.
+
+# Drop the columns specified above.
+working.dataset <- subset(crash2, select = -c(entryid, scauseother, ddeath, ddischarge, source, trandomised, outcomeid, boxid, packnum, ndaysicu, status, cause))
+# Check whether columns dropped successfully or not
+print(dim(working.dataset))
+# Get the columns in dataset again
+print(colnames(working.dataset))
+```
+
+```{r ColumnsClassType, message = FALSE, results='hide', warning = FALSE}
+for (col in colnames(working.dataset))
+{
+  cat(sprintf("\"%s\" \"%s\"\n", col, class(working.dataset[[col]])))
+}
+```
+
+```{r AppendLevelToConditionAndStatus, message = FALSE, results='hide', warning = FALSE}
+##### In the given dataset, the problem statement is to predict or classify "condition" column which signifies condition of the patient when discharged. In addition, classification must also be performed to understand whether the patient looses his life. There is a need to add another level in this column to specify whether the patient has lost the life. Below code is to try and add another level "dead" to signify that the patient has lost the life.
+
+# Add another level "dead" to the condition column
+levels(working.dataset$condition) <- c(levels(working.dataset$condition), "dead")
+# Apply newly added dead level to all NAs in the condition column
+working.dataset$condition[-which(is.na(crash2$ddeath))] <- "dead"
+# Check if level is applied correctly
+any(is.na(working.dataset$condition))
+head(working.dataset$condition)
+#NAs are still present in condition
+# Count the NAs present in condition
+# gives 165, we can certainly neglect
+# these 165 entries considering size of 
+# dataset
+print(length(working.dataset$condition[is.na(working.dataset$condition)]))
+
+# Try to repeat same process for the column "status"
+# Add another level "dead" to the status column
+#levels(working.dataset$status) <- c(levels(working.dataset$status), "dead")
+# Apply newly added dead level to all NAs in the status column
+#working.dataset$status[-which(is.na(crash2$ddeath))] <- "dead"
+# Check if level is applied correctly
+#any(is.na(working.dataset$status))
+#head(working.dataset$status)
+# NAs are still present in status
+# Count the NAs present in status
+#print(length(working.dataset$status[is.na(working.dataset$status)]))
+
+# check number of NAs present in status
+# when condition NAs are removed
+# 0 that is perfect.
+temp.dataset <- working.dataset[-which(is.na(working.dataset$condition)), ]
+print(length((temp.dataset$status[is.na(temp.dataset$status)])))
+```
+
+```{r AppendLevelToCause, message = FALSE, results='hide', warning = FALSE}
+
+##### For the attribute "cause" which represents cause of death of the patient, a new level is added to represent NAs "NotApplicable", just to make it simple
+
+# Add a new level "NotApplicable" to the cause column
+#levels(working.dataset$cause) <- c(levels(working.dataset$cause), "NotApplicable")
+# Apply newly added dead level to all NAs in the cause column
+#working.dataset$cause[which(is.na(crash2$ddeath))] <- "NotApplicable"
+# Check if level is applied correctly
+#any(is.na(working.dataset$cause))
+#head(working.dataset$cause)
+```
+
+```{r DeleteNAsFromConditionAttr, message = FALSE, results='hide', warning = FALSE}
+##### Delete all the rows with NA in condition attribute, which is a class attribute for classification.
+
+# Prepare dataset without Condition NAs
+working.dataset <- working.dataset[-which(is.na(working.dataset$condition)), ]
+```
+
+```{r, message = FALSE, results='hide', warning = FALSE}
+#### Replace NAs with 0 For columns "ncell", "nplasma", "nplatelets" and "ncryo"
+
+working.dataset$ncell[is.na(working.dataset$ncell)] <- 0
+working.dataset$nplasma[is.na(working.dataset$nplasma)] <- 0
+working.dataset$nplatelets[is.na(working.dataset$nplatelets)] <- 0
+working.dataset$ncryo[is.na(working.dataset$ncryo)] <- 0
+
+dim(working.dataset)
+working.dataset <- working.dataset[complete.cases(working.dataset), ]
+dim(working.dataset)
+```
+
+```{r ConvertToThreeClass, message = FALSE, results='hide', warning = FALSE}
+##### Categorizing condition into three classes
+
+working.dataset$condition_severity <- factor(case_when(
+  working.dataset$condition  == "dead" ~ "Dead",
+  working.dataset$condition  == "fully dependent, requiring attention day and night" ~ "Dependent",
+  working.dataset$condition  == "dependent, but not requiring constant attention" ~ "Dependent",
+  working.dataset$condition  == "some restriction in lifestyle but independent" ~ "Independent",
+  working.dataset$condition  == "minor symptoms" ~ "Independent",
+  working.dataset$condition  == "no symptoms" ~ "Independent",
+  TRUE ~ "Unknown"
+), levels = c("Dead", "Dependent", "Independent"))
+
+working.dataset$condition <- working.dataset$condition_severity
+working.dataset <- subset(working.dataset, select = -c(condition_severity))
+colnames(working.dataset)
+levels(working.dataset$condition)
+```
+
+After IDA, data cleaning and re-classification of the condition parameter; the CRASH-2 dataset was split into 3 subsets- Training data (10864 rows), Validation Data (3621 rows) and Testing Data (3619 rows). The three datasets have 32 columns. The data across the 3 classification parameters was imbalanced. Because balancing the dataset before fitiing a model biases the model and throws out potentially useful data, we focused on using a **balanced accuracy** metric to evaluate the best predictive algorithm.
+
+```{r SplitDataSet, message = FALSE, results='hide', warning = FALSE}
+##### Split Dataset into training, validation and test.
+
+# set seed
+set.seed(108)
+
+# Get Training DataSet
+TrainingIndexes <- createDataPartition(y = working.dataset$condition, p = 0.6)
+
+# Get Training Dataset
+Training.Dataset <- working.dataset[TrainingIndexes[[1]], ]
+
+# Dimension of training dataset
+dim(Training.Dataset)
+
+# Test and Evaluation Dataset
+TestAndValidationDataSet <- working.dataset[-TrainingIndexes[[1]], ]
+
+# Dimensions for Test and Validation Dataset
+dim(TestAndValidationDataSet)
+
+# Split TestAndValidationDataSet further in 50:50
+# set seed
+set.seed(108)
+# Get Test DataSet
+TestIndexes <- createDataPartition(y = TestAndValidationDataSet$condition, p = 0.5)
+
+# Get Test DataSet
+Test.Dataset <- TestAndValidationDataSet[TestIndexes[[1]], ]
+
+# Get dimenstions of Test DataSet
+dim(Test.Dataset)
+
+# Get Validation DataSet
+Validatioin.Dataset <- TestAndValidationDataSet[-TestIndexes[[1]], ]
+
+# Get dimensions of Validation DataSet
+dim(Validatioin.Dataset)
+
+# Create rda files for all three dataset
+save(Training.Dataset, file = "Training.Dataset.rda")
+save(Test.Dataset, file = "Test.Dataset.rda")
+save(Validatioin.Dataset, file = "Validatioin.Dataset.rda")
+Validatioin.Dataset <- NULL
+Test.Dataset <- NULL
+Training.Dataset <- NULL
+```
+
+```{r ValidateRDAFiles, message = FALSE, results='hide', warning = FALSE}
+##### Validate files
+
+load(file = "Training.Dataset.rda")
+load(file = "Test.Dataset.rda")
+load(file = "Validatioin.Dataset.rda")
+dim(Training.Dataset)
+dim(Test.Dataset)
+dim(Validatioin.Dataset)
+```
+
+### 4. FEATURE ENGNEERING
+Feature engineering is the process of transforming raw data into features that better represent the underlying problem to the predictive models, resulting in improved model accuracy on unseen data. Three methods- Step-wise selection, MARS(Multivariate Adaptive Regression Splines), and Random Forest have been used to perform feature selection.
+
+#### 4.1 STEP-WISE AIC
+Bi-Directional Step-wise variable selection was run with Multinomial Logistic Regression to identify features that improve model performance based on AIC. AIc was selected to penalize for model complexity to avoid over-fitting. 7 features were identified to be removed from the model - sex, injury time, bvii, platelets, heart rate, gcs verbal and DVT. 
+
+```{r message = FALSE, results='hide', warning = FALSE, eval=FALSE}
+mlogit_model <- multinom(condition ~. ,data =Training.Dataset, maxit = 1000) 
+
+###   Perform Step-Wise Variable Selection
+step <- stepAIC(mlogit_model, direction="both", trace=FALSE)
+```
+
+#### 4.2 MARS(MULTIVARIATE ADAPTIVE REGRESSION SPLINES)
+MARS is a non-parametric regression technique and can be seen as an extension of linear models that automatically models nonlinearities and interactions between variables. The top features identified from this method were - gcs, bmaint, ncell, injurytypepenetrating, age, babdomen, rr, bpe, bheadinj, sbp, bpelvis, bstroke and nplatelets.
+
+```{r message = FALSE, results='hide', warning = FALSE}
+marsModel <- earth(condition~ ., data=Training.Dataset) # build model
+ev <- evimp (marsModel) 
+ev
+```
+
+#### 4.3 RANDOM FOREST
+
+```{r message = FALSE, results='hide', warning = FALSE}
+set.seed(108)
+rf.model <- randomForest(condition~., data = Training.Dataset)
+op <- varImp(rf.model)
+op
+#df <- data.frame(matrix(unlist(op), nrow=33, byrow=T),stringsAsFactors=FALSE)
+df <- data.frame(Attributes = unlist(rownames(op)), Values = op[[1]])
+df <- df[order(-df$Values), ]
+df
+varImpPlot(rf.model, main = "FIGURE 4 \n Random Forest Feature Engineering", mar = c(0,0,1,0))
+```
+
+Each feature selection model generated slightly different results. Ultimately, the feature engineering model used, was based on the classification algorithm being trained because each classification algorithm performed better on varying attributes.
+
+### 5. CLASSIFICATION ALGORITHMS USED
+
+#### 5.1 LINEAR MODELS
+Various Linear Models were examined to identify the performance of these models on the classification task. Multinomial Linear Regression was used as a base model. Features identified by both stepwise AIC and random forest were tried. Stepwise AIC was shown to have better performance as expected. We have also examined ordinal linear regression as our outcome variable has an inherent order to its classes. However, the ordinal model did not show good results. This could be due to the variance within the dependent class which would not satisfy some of the assumptions of ordinal model. The best results were selected from multinomial regression with stepwiseAIC and provided in the model comparison. 
+
+
+```{r message = FALSE, results='hide', warning = FALSE}
+#feature selected by step forward method.
+
+stepwise_features <- c("age", "injurytype", "sbp", "rr", "cc", "gcseye", "gcsmotor", "gcs", "bheadinj", "bneuro",
+                       "bchest", "babdomen", "bpelvis", "bpe", "bstroke", "bbleed", "bmi", "bgi", "bloading",
+                       "bmaint", "ncell", "nplasma", "ncryo", "condition")
+
+
+
+multinominal_reg.Stepwise_features <- multinom(condition ~ ., data = Training.Dataset[,stepwise_features])
+ordinal_reg.Stepwise_features <- polr(condition ~ ., data = Training.Dataset[,stepwise_features])
+
+preds.multinomial <- predict(multinominal_reg.Stepwise_features, Validatioin.Dataset[,stepwise_features])
+cm.multinomial = confusionMatrix(data = preds.multinomial, reference = Validatioin.Dataset$condition) 
+
+preds.oridnal <- predict(ordinal_reg.Stepwise_features, Validatioin.Dataset[,stepwise_features])
+cm.ordinal = confusionMatrix(data = preds.oridnal, reference = Validatioin.Dataset$condition) 
+
+test_preds.final <- predict(multinominal_reg.Stepwise_features, Test.Dataset[,stepwise_features])
+cm.final <- confusionMatrix(data = test_preds.final, reference = Test.Dataset$condition)
+cm.final
+cm.final$table
+```
+
+#### 5.2 K-NEAREST NEIGHBORS
+The k-nearest neighbors algorithm (k-NN) is a non-parametric method used for classification and regression. k-NN is a type of lazy learning, where the function is only approximated locally and is sensitive to the local structure of the data. 25 features selected by step forward method were used to implement k-NN. The categorical values were converted to numerical values and the data was normalised to further improve the balanced accuracy. Optimal value of k was determined by using the train function from caret class to train the algorithm on a number of k values. 
+
+```{r message = FALSE, results='hide', warning = FALSE}
+#feature selected by step forward method.
+
+final_col <- c("age", "injurytime", "injurytype", "sbp", "rr", "cc", "gcseye", "gcsmotor", "gcs", 
+                         "bheadinj", "bchest", "babdomen", "bpelvis", "bpe", "bdvt", "bstroke", "bbleed", "bmi", 
+                        "bgi", "bmaint", "ncell", "nplasma", "nplatelets", "ncryo","condition")
+
+K_TrainDataSet<-Training.Dataset[final_col]
+K_ValidationDataSet <- Validatioin.Dataset[final_col]
+
+#Converting categorical values into numeric value so can apply normalization 
+#blunt=1 ,penetrating =2, blunt and penetrating =3
+
+K_TrainDataSet$injurytype=as.numeric(K_TrainDataSet$injurytype)
+K_ValidationDataSet$injurytype=as.numeric(K_ValidationDataSet$injurytype)
+
+#Normalization
+normalize <- function(x) {
+return ((x - min(x)) / (max(x) - min(x))) }
+
+#Remove target class so can apply normalization
+normalize_TraindataSet <- subset(K_TrainDataSet, select = -c(condition))
+normalize_ValidationdataSet <- subset(K_ValidationDataSet, select = -c(condition))
+
+#normalize_date= K_NearDataSet[-c 'condition']
+
+#Apply normazilation
+TrainNormalization<- normalize(normalize_TraindataSet)
+ValidationNormalization<- normalize(normalize_ValidationdataSet)
+
+#Final Data set combine with target class
+
+Final_TrainNormalizeDataSet<- cbind(TrainNormalization, condition=K_TrainDataSet$condition)
+Final_ValidationNormalizeDataSet<- cbind(ValidationNormalization, condition=K_ValidationDataSet$condition)
+
+#Extract the target labels  so can pass parameter to KNN
+Target_train_labels <- K_TrainDataSet$condition
+Target_validation_labels <-K_ValidationDataSet$condition 
+
+#creating K-nearst Neighbour Model
+MY_KnnModel <- knn(TrainNormalization,ValidationNormalization,cl=Target_train_labels,k=9)
+
+
+#finding optimal value of K using caret class funtion'Train'
+Optimal_K_Value <- train(TrainNormalization, Target_train_labels, method = "knn", preProcess = c("center","scale"))
+
+Optimal_K_Value
+
+
+```
+
+```{r message = FALSE, results='hide', warning = FALSE}
+#Plot the accuracy at different K values 
+plot(Optimal_K_Value, main = 'FIGURE 5 \n OPTIMAL VALUE FOR k-NEAREST NEIGHBORS', 
+     xlab ='Number of Neighbors', ylab = 'Accuracy'  )
+
+```
+
+Based on this plot, k=9 was chosen to classify the condition of patients. 
+
+```{r message = FALSE, results='hide', warning = FALSE}
+#cross Table of the model
+#install.packages("gmodels")
+CrossTable(x=Target_validation_labels,y=MY_KnnModel, prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE, prop.t = FALSE)
+
+``` 
+ 
+```{r message = FALSE, results='hide', warning = FALSE}
+#Confusion Matric
+confusionMatrix(MY_KnnModel ,Target_validation_labels)
+
+```
+
+#### 5.3 RANDOM FOREST
+Random Forest is a robust machine learning algorithm that uses a large number of small decision trees, called estimators, to produce their own predictions. The random forest model combines the predictions of the estimators to produce a more accurate prediction. Performance of Random Forest was evaluated on "Validation Dataset" using different values of "ntree". The best ovaerall balanced accuracy was obtained for ntree = 3500. The plot below shows the overall balanced accuracy for different values of ntree.
+
+```{r trainRandomForest, message = FALSE, results='hide', warning = FALSE}
+rf.test.collection <- c()
+ntreesCollection <- c(500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 5000)
+
+for (ntreeValue in ntreesCollection)
+{
+  set.seed(108)
+  rf.model <- randomForest(condition~., data = Training.Dataset, ntree = ntreeValue)
+  rf.test <- predict(rf.model, newdata = Validatioin.Dataset)
+  
+  rf.confusionMatrix <- confusionMatrix(rf.test, Validatioin.Dataset$condition)
+  
+  rf.test.collection <- c(rf.test.collection, mean(rf.confusionMatrix$byClass[,11]))
+}
+rf.test.collection
+```
+
+```{r ntreeSelectionPlot, message = FALSE,  warning = FALSE}
+ggplot(data = NULL, aes(x = ntreesCollection, y = rf.test.collection)) + geom_line(colour="blue") +  geom_point() + labs(title = "FIGURE 6\nRandom Forest ntree Performance", x = "ntree values", y = "Balanced Accuracy")
+```
+
+```{r testRandomForest, message = FALSE, results='hide', warning = FALSE}
+set.seed(108)
+rf.model <- randomForest(condition~., data = Training.Dataset, ntree = 3500)
+
+rf.test <- predict(rf.model, newdata = Test.Dataset)
+rf.confusionMatrix <- confusionMatrix(rf.test, Test.Dataset$condition)
+rf.confusionMatrix
+```
+
+#### 5.4 SUPPORT VECTOR MACHINES
+Support Vector Machines is a powerful Machine learning algorithm which aims to find a hyperplane or a decision boundary in an N-dimensional space that distinctly classifies the data into accurate classes. Implementation of SVM on the given dataset was tried using different available kernels, and it was observed that the overall balanced accuracy was best for the "Radial Basis" when tested against "Validation Dataset". The plot shows performance of SVM using different kernels. SVM was trained using 10 fold cross validation which was achieved by specifying value of input parameter "cross" as 10.
+
+```{r trainsvm, message = FALSE, results='hide', warning = FALSE}
+svm.kernels <- c("linear", "polynomial", "radial", "sigmoid")
+svm.test.collection <- c()
+for (ker in svm.kernels)
+{
+  print(ker)
+  set.seed(108)
+  svm.model <- svm(condition~., data = Training.Dataset, cross = 10, kernel = ker, type = "C-classification")
+  svm.test <- predict(svm.model, newdata = Validatioin.Dataset)
+  svm.confusionMatrix <- confusionMatrix(svm.test, Validatioin.Dataset$condition)
+  svm.test.collection <- c(svm.test.collection, mean(svm.confusionMatrix$byClass[,11]))
+}
+svm.test.collection
+```
+
+```{r PlotSVMKernelResults, message = FALSE, warning = FALSE}
+ggplot(data = NULL, aes(x = svm.kernels, y = svm.test.collection))  + geom_point(colour = "blue") + labs(title = "FIGURE 7\nSVM kernel Performance", x = "Kernel values", y = "Balanced Accuracy")
+```
+
+```{r testsvm, message = FALSE, results='hide', warning = FALSE}
+  set.seed(108)
+  svm.model <- svm(condition~., data = Training.Dataset, cross = 10, kernel = "radial", type = "C-classification")
+  svm.test <- predict(svm.model, newdata = Test.Dataset)
+  svm.confusionMatrix <- confusionMatrix(svm.test, Test.Dataset$condition)
+  svm.confusionMatrix
+```
+
+#### 5.5 BAGGING
+Bagging(bootstrap aggreagation) is used as one of the mode for this classification task. This models is trained using the features identified by the stepwise feature selection and also using all the features. But the bagging with and without stepwise features selection is giving very similar results. So we have decided to use all the features instead of doing any feature selection. The results were as follows
+
+```{r Bagging using stepwise feature selection, message = FALSE, results='hide', warning = FALSE}
+
+# fit the model
+fit.bagging.stepwise <- bagging(condition~.,data=Training.Dataset[,stepwise_features])
+
+# make predictions
+predictions.stepwise <- predict(fit.bagging.stepwise,Test.Dataset[,stepwise_features], type="class")
+# summarize accuracy
+tab.stepwise<- table(predictions.stepwise, Test.Dataset$condition)
+
+confusionMatrix(tab.stepwise)
+```
+
+```{r Bagging without stepwise feature selection, message = FALSE, results='hide', warning = FALSE}
+fit.bagging <- bagging(condition~., data=Training.Dataset)
+
+# make predictions
+predictions <- predict(fit.bagging, Test.Dataset, type="class")
+# summarize accuracy
+tab<- table(predictions, Test.Dataset$condition)
+
+confusionMatrix(tab)
+```
+
+### 6. CLASSIFICATION PERFORMANCE ALGORITHM
+The table below lists performance all the classification models implemented as a part of this project. It specifies performance on different metrics for each class. It also includes overall balanced accuracy for all the models. From the table it can be observed that almost all the models, except for KNN, performed similarly or equally when compared on the basis overall balanced accuracy. Performance of Bagging has been the best, and is marginally better than Linear Model, SVM and Random Forest.
+
+```{r ModelPerformanceTable, message = FALSE, warning = FALSE}
+
+performance.df <- data.frame(Metric = c("Sensitivity for Class Dead", "Specificity for Class Dead", "Balanced Accuracy for Class Dead", "Sensitivity for Class Dependent", "Specificity for Class Dependent", "Balanced Accuracy for Class Dependent", "Sensitivity for Class InDependent", "Specificity for Class InDependent", "Balanced Accuracy for Class InDependent", "Overall Balanced Accuracy"),
+                             KNN = c(31.215, 95.493, 63.354, 10.249, 93.856, 52.053, 93.310, 31.820, 62.570, 59.325),
+                             "Linear" = c(56.157, 94.392, 75.274, 11.757, 96.446, 54.101, 94.960, 43.130, 69.050, 66.141),
+                             "SVM" = c(58.769, 94.716, 76.743, 8.990, 97.481, 53.236, 95.850, 41.140, 68.50, 66.159),
+                              "RandomForest" = c(55.970, 95.300, 75.635, 12.863, 96.480, 54.672, 95.60, 42.570, 69.09, 66.465),
+                              "Bagging" = c(52.985, 94.522, 73.753, 24.066, 90.476, 57.271, 89.460, 51.950, 70.70, 67.241))
+
+
+
+performance.df %>%
+  kbl(caption = "FIGURE 8 : Performane of Models Table") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), font_size = 12, position = "left")
+```
+
+```{r PlotPerformanceOfModels, message = FALSE, results='hide', warning = FALSE}
+ggplot(data = NULL, aes(x = c("KNN", "Linear", "SVM", "RandomForest", "Bagging"),
+                        y = c(59.325, 66.141, 66.159, 66.465, 67.241))) + geom_point(colour = "blue") + labs(title = "FIGURE 9\nPerformance of Models Plot", x = "Models", y = "Overall Balanced Accuracy")
+```
+
+### 7. CONCLUSION
+This study was undertaken with the objective to classify trauma patients into 3 main catedories-'Dead', 'Dependent' and 'Independent'. This classification would help the doctors all over the world to make informed clinical decision making when treating the patients. Five classification algorithms were implemented whose balanced accuracy varied from 59.26% to 66.65%. 
+
+Attempts were also made to increase the accuracy in predicting the patients who were likely to be 'Dead' or 'Dependent' in the future. These prediction could be used to organise appropriate rehabilitation resources for the patient and their families in a timely manner.
+
+One of the reasons for the comparitively lower accuracy can be attributed to the lack of previous medical history for the trauma patients. In a real world setting, a patient's previous health conditions do impact the probability of them surviving any trauma, which the CRASH - 2 dataset did not consider.
+
+Another reason is due to the class imbalance especially in dependent class that are harder to separate from dead and independent. SMOTE was used to handle for this but showed minor improvements and we avoid it to avoid overfitting on the noise in the imbalanced classes.
+
+Due to the lower accuracy, the current evaluated models may not be useful for decision making in hospital settings. Further attempts will be undertaken in the future to improve this accuracy by working on the data imbalance and implementing some more classification algorithms.
+
+### 8. AUTHOR'S CONTRIBUTIONS
+
+#### Aakanksha Jain(312153430)
+Worked on the plan and exploratory data analysis. From this work the missing value analysis and correlation analysis was used in the final report. Also assisted in removing redundant features from the original data frame. The rest of the work was not used as other member had better graphical representations of the EDA. Additionally, assisted in editing the final EDA report with the rest of the team. Assisted in editing the final presentation with the rest of the team. Worked on writing the final report, specifically on the overview of the problem, dataset description, correlation, and feature engineering.
+
+#### Aditya Deshpande(500262382)
+I must mention that it was a collective effort from everyone. In fact, after a long time I had an opportunity to work with some responsible, sensible and mature people. I would like to thank everyone for their efforts. My contribution involved initial data analysis and data manipulation, specifically in terms of filtering and organizing the data, including splitting the data into Training, Test and Validation dataset. The intention was to get the data in the format so that it can be directly used to train the models. Also, I managed to implement Random Forest and SVM models for classification.
+
+#### Amit Desai(500589441)
+For the final group project we worked collectively and collaborated together. For the  initial EDA we all put our efforts. For my part I did some descriptive statistics using R code to calculate statistical information like number of male/female patients, type of injuries among our sample dataset. For feature engineering I suggested and applied Random forest algorithm to derive variable importance and also tried Logistics Regression. For the final part I had taken the responsibility of Presentation and created our group presentation. I also recorded the video for the final presentation.
+
+#### Anirudh Bhat(490492189)
+I started working on the project a bit late so it took some time to get updated on others contribution upto that point. I analysed the dataset and the pre-processing had already been done. Since there were 5 models in total and each of them was assigned to one team member, I did not work on the model. However I gave advice and made necessary changes to each of the models to perfect them and give the required results. Happy with the team as well as my individual efforts. 
+
+#### Geogy Sabu Jose(490556492)  
+Worked on EDA for re-classifying the outcome variable, stepwiseAIC for feature selection and Linear Models (Ordinal and Multinomial) for classification.
+
+#### Jhanvi Gupta(500249305)
+Worked on  the Introduction and Overview part of exploratory data analysis. Additionally, worked on feature extraction where I implemented MARS(Multiple Adaptive Regression Splines). For the final report, I was responsible for compiling the work by all my team members, structuring the report(which involved aligning it, adding captions to images, creating the basic template for the report and writing about our dataset description, IDA, Models implemented and conclusion).
+
+#### Rana Hamad Khan (500215676)
+I worked on the first stage of the project which was EDA and I did descriptive statistics using R  to calculate statistical information like whats type of injuries among male and female and their age distribution and also how many days spent in ICU by different types of injuries. All these information shown in histogram with different color distribution. And we divided different ML models among team members and I was working on KNN. My primary task was to train the model on the best feature which impacts the model  and find the optimal value of  K using different techniques. Other than that I tested my model accuracy on the validation data set and presented the balance accuracy of each class, sensitivity, specificity and overall balance accuracy of my model on the validation date set.
+
+#### Shabari Gadewar(490607392)
+I did some of the initial data analysis, to be specific, find correlation among different parameters and created correlation heatmap. Also did some feature engineering to find the most important parameters. for classification, I used Bagging for modeling.
