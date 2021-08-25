@@ -1,0 +1,98 @@
+---
+title: "Assignment Base RMD"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+###### Read Data From File and load Libraries
+
+```{r ValidateRDAFiles}
+set.seed(108)
+
+library(dplyr)
+library(nnet)
+library(MASS)
+
+load(file = "Training.Dataset.rda")
+load(file = "Test.Dataset.rda")
+load(file = "Validatioin.Dataset.rda")
+dim(Training.Dataset)
+dim(Test.Dataset)
+dim(Validatioin.Dataset)
+```
+
+###### Cleaning
+
+Replaced missing data in transfused variables (plasma, platelets, cell, cryo), days in ICU, and drugs given to 0. 
+
+Created final outcome varibale condition severity and dropped columns related to outcome variable (status, condition and cause of death), days in ICU and entryid. 
+
+Removed remaining rows with NA (990 patients dropped)
+
+```{r Minor Cleaning}
+
+
+baseR.replace      <- function(x) { replace(x, is.na(x), 0) }
+
+colnames(Training.Dataset)[colSums(is.na(Training.Dataset)) > 0]
+
+Training.Dataset$nplasma <- baseR.replace(Training.Dataset$nplasma)
+Training.Dataset$nplatelets <- baseR.replace(Training.Dataset$nplatelets)
+Training.Dataset$ncell <- baseR.replace(Training.Dataset$ncell)
+Training.Dataset$ndaysicu <- baseR.replace(Training.Dataset$ndaysicu)
+Training.Dataset$ncryo <- baseR.replace(Training.Dataset$ncryo)
+Training.Dataset$bvii <- baseR.replace(Training.Dataset$bvii)
+
+Training.Dataset$condition_severity <- factor(case_when(
+  Training.Dataset$condition  == "dead" ~ "Dead",
+  Training.Dataset$condition  == "fully dependent, requiring attention day and night" ~ "Dependent",
+  Training.Dataset$condition  == "dependent, but not requiring constant attention" ~ "Dependent",
+  Training.Dataset$condition  == "some restriction in lifestyle but independent" ~ "Independent",
+  Training.Dataset$condition  == "minor symptoms" ~ "Independent",
+  Training.Dataset$condition  == "no symptoms" ~ "Independent",
+  TRUE ~ "Unknown"
+), levels = c("Dead", "Dependent", "Independent"))
+
+drop <- c("entryid","status","condition", "cause", "ndaysicu")
+working.dataset = Training.Dataset[,!(names(Training.Dataset) %in% drop)]
+dim(working.dataset)
+complete.workingdata <- na.omit(working.dataset)
+dim(complete.workingdata)
+```
+
+###### Step-wise regression 
+
+
+```{r StepwiseReg}
+
+test <- multinom(condition_severity ~ ., data = working.dataset)
+mlogit_model <- multinom(condition_severity ~. ,data =complete.workingdata, maxit = 1000) 
+
+###   Perform Step-Wise Variable Selection
+step <- stepAIC(mlogit_model, direction="both")
+step$anova
+```
+
+
+
+
+###### Dataset with Key features
+
+Dropping all variables not identified as significant by Stepwise regression and dropping rows that still have NA (954).  
+
+```{r FinalData}
+
+final_col <- c("age", "injurytime", "injurytype", "sbp", "rr", "cc", "gcseye", "gcsmotor", "gcs", 
+                         "bheadinj", "bchest", "babdomen", "bpelvis", "bpe", "bdvt", "bstroke", "bbleed", "bmi", 
+                         "bgi", "bmaint", "ncell", "nplasma", "nplatelets", "ncryo")
+final.working <- working.dataset[final_col]
+
+dim(working.dataset)
+dim(final.working)
+
+final_complete <- na.omit(final.working)
+dim(final_complete)
+```
