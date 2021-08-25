@@ -1,0 +1,212 @@
+---
+title: "Assignment Base RMD"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+###### Read Data From File
+
+```{r ReadDataSet}
+library(dplyr)
+# Read the input data file.
+load(file = "crash2.rda")
+```
+
+##### Analyse the data 
+
+```{r CheckInputData}
+# Check the class of input data
+print(class(crash2))
+# Check Dimensions of input data
+print(dim(crash2))
+# Check columns present in the data
+print(colnames(crash2))
+# write to csv so that data can be
+# analysed manually
+#write.csv(crash2, "data.csv")
+```
+
+
+##### After performing manula preliminary analysis of the data, the columns identified as irrelevant are decided to be dropped. Below is the explanation and description of the columns that are dropped.
+
+##### Column: "entryid" -> Unique id to identify patient.
+##### Column: "scauseother" -> Specifies cuase of death for category other.
+##### Column: "ddeath" -> Date of death.
+##### Column: "ddischarge" -> Date of discharge from the hospital.
+##### Column: "source" -> Source of communication or entry form of patient.
+##### Column: "trandomised" -> Date of Randomization
+##### Column: "outcomeid" -> Unique Number From Outcome Database
+##### Column: "boxid" -> treatment uniqe combination along with packnum
+##### Column: "packnum" -> treatment uniqe combination along with boxid
+##### Column: "ndaysicu" -> Ndays in ICU should not be considered as it may not be known at the time of admission.
+##### Column: "status" -> Status specifies the current status of the patient. It acts like information leak.
+##### Column: "cause" -> Specifies the cause of death for the patient. It acts like information leak.
+
+```{r DropUnWantedColumns}
+# Drop the columns specified above.
+working.dataset <- subset(crash2, select = -c(entryid, scauseother, ddeath, ddischarge, source, trandomised, outcomeid, boxid, packnum, ndaysicu, status, cause))
+# Check whether columns dropped successfully or not
+print(dim(working.dataset))
+# Get the columns in dataset again
+print(colnames(working.dataset))
+```
+
+##### Check the class of the columns in working data.
+
+```{r ColumnsClassType}
+for (col in colnames(working.dataset))
+{
+  cat(sprintf("\"%s\" \"%s\"\n", col, class(working.dataset[[col]])))
+}
+```
+
+##### In the given dataset, the problem statement is to predict or classify "condition" column which signifies condition of the patient when discharged. In addition, classification must also be performed to understand whether the patient looses his life. There is a need to add another level in this column to specify whether the patient has lost the life. Below code is to try and add another level "dead" to signify that the patient has lost the life.
+
+```{r AppendLevelToConditionAndStatus}
+# Add another level "dead" to the condition column
+levels(working.dataset$condition) <- c(levels(working.dataset$condition), "dead")
+# Apply newly added dead level to all NAs in the condition column
+working.dataset$condition[-which(is.na(crash2$ddeath))] <- "dead"
+# Check if level is applied correctly
+any(is.na(working.dataset$condition))
+head(working.dataset$condition)
+#NAs are still present in condition
+# Count the NAs present in condition
+# gives 165, we can certainly neglect
+# these 165 entries considering size of 
+# dataset. Also these are the patients
+# moved to other hospitals, so the 
+# final condition of the patients
+# is unknown.
+print(length(working.dataset$condition[is.na(working.dataset$condition)]))
+
+# check number of NAs present in status
+# when condition NAs are removed
+# 0 that is perfect.
+temp.dataset <- working.dataset[-which(is.na(working.dataset$condition)), ]
+print(length((temp.dataset$status[is.na(temp.dataset$status)])))
+```
+##### Print all the columns in working data that are represented as factors. These columns need to be represented as numeric values so that can be used in the classification by applying scale. Once the factors are represented as numeric values, dataset will be easier to perform classification.
+
+```{r GetFactorColumns}
+for(col in colnames(working.dataset))
+{
+  if(is.factor(working.dataset[[col]]))
+    print(col)
+}
+```
+
+##### Delete all the rows with NA in condition attribute, which is a class attribute for classification.
+
+```{r DeleteNAsFromConditionAttr}
+# Prepare dataset without Condition NAs
+working.dataset <- working.dataset[-which(is.na(working.dataset$condition)), ]
+```
+
+##### Check final working dataset
+
+```{r AnalyseFinalWorkingDataSet}
+dim(working.dataset)
+```
+
+#### Replace NAs with 0 For columns "ncell", "nplasma", "nplatelets" and "ncryo"
+
+```{r}
+working.dataset$ncell[is.na(working.dataset$ncell)] <- 0
+working.dataset$nplasma[is.na(working.dataset$nplasma)] <- 0
+working.dataset$nplatelets[is.na(working.dataset$nplatelets)] <- 0
+working.dataset$ncryo[is.na(working.dataset$ncryo)] <- 0
+
+dim(working.dataset)
+working.dataset <- working.dataset[complete.cases(working.dataset), ]
+dim(working.dataset)
+```
+##### Categorizing condition into three classes
+
+```{r ConvertToThreeClass}
+working.dataset$condition_severity <- factor(case_when(
+  working.dataset$condition  == "dead" ~ "Dead",
+  working.dataset$condition  == "fully dependent, requiring attention day and night" ~ "Dependent",
+  working.dataset$condition  == "dependent, but not requiring constant attention" ~ "Dependent",
+  working.dataset$condition  == "some restriction in lifestyle but independent" ~ "Independent",
+  working.dataset$condition  == "minor symptoms" ~ "Independent",
+  working.dataset$condition  == "no symptoms" ~ "Independent",
+  TRUE ~ "Unknown"
+), levels = c("Dead", "Dependent", "Independent"))
+
+working.dataset$condition <- working.dataset$condition_severity
+working.dataset <- subset(working.dataset, select = -c(condition_severity))
+colnames(working.dataset)
+levels(working.dataset$condition)
+```
+
+##### Split Dataset into training, validation and test.
+
+```{r SplitDataSet}
+# Import caret
+library("caret")
+# set seed
+set.seed(108)
+
+# Get Training DataSet
+TrainingIndexes <- createDataPartition(y = working.dataset$condition, p = 0.6)
+
+# Get Training Dataset
+Training.Dataset <- working.dataset[TrainingIndexes[[1]], ]
+
+# Dimension of training dataset
+dim(Training.Dataset)
+
+# Test and Evaluation Dataset
+TestAndValidationDataSet <- working.dataset[-TrainingIndexes[[1]], ]
+
+# Dimensions for Test and Validation Dataset
+dim(TestAndValidationDataSet)
+
+# Split TestAndValidationDataSet further in 50:50
+# set seed
+set.seed(108)
+# Get Test DataSet
+TestIndexes <- createDataPartition(y = TestAndValidationDataSet$condition, p = 0.5)
+
+# Get Test DataSet
+Test.Dataset <- TestAndValidationDataSet[TestIndexes[[1]], ]
+
+# Get dimenstions of Test DataSet
+dim(Test.Dataset)
+
+# Get Validation DataSet
+Validatioin.Dataset <- TestAndValidationDataSet[-TestIndexes[[1]], ]
+
+# Get dimensions of Validation DataSet
+dim(Validatioin.Dataset)
+
+# Create rda files for all three dataset
+save(Training.Dataset, file = "Training.Dataset.rda")
+save(Test.Dataset, file = "Test.Dataset.rda")
+save(Validatioin.Dataset, file = "Validatioin.Dataset.rda")
+Validatioin.Dataset <- NULL
+Test.Dataset <- NULL
+Training.Dataset <- NULL
+```
+
+
+##### Validate files
+
+```{r ValidateRDAFiles}
+load(file = "Training.Dataset.rda")
+load(file = "Test.Dataset.rda")
+load(file = "Validatioin.Dataset.rda")
+dim(Training.Dataset)
+dim(Test.Dataset)
+dim(Validatioin.Dataset)
+```
+
+
+
+
+
+
